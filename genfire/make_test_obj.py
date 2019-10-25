@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 
 def create_obj():
     shape = [101,101,101]
@@ -15,4 +16,34 @@ def create_obj():
     obj[24:75,24:24:75] = obj2
 
     return obj
+
+def show():
+    plt.figure()
+    ax = plt.gca(projection='3d')
+    surface = ax.plot_surface()
+
+ np.save()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
