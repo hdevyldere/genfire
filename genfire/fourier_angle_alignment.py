@@ -40,21 +40,24 @@ def slice( fft_space, orig_Euler_angle, Euler_angle_ranges):
 
     phi0, theta0, psi0, ind = [0,0,0,0]
     for phi in Euler_angle_ranges[0]:
-        obj_rotation.axis = 0
+        obj_rotation.axis = 2
         obj = obj_rotation.forward(obj, phi - phi0 )
         phi0 = phi
-        for theta in Euler_angle_ranges[1]:
-            obj_rotation.axis = 1
-            obj = obj_rotation.forward(obj, theta - theta0 )
-            theta0 = theta
-            for psi in Euler_angle_ranges[2]:
-                obj_rotation.axis = 0
-                obj = obj_rotation.forward(obj, psi - psi0 )
-                psi0 = psi
-                #show_obj(obj[:,:,:,0])
-                out = obj[:,:,:,0]**2 + obj[:,:,:,1]**2
-                save(out.sqrt(),phi,theta,psi,ind)
-                ind +=1
+        save(op.abs(obj),phi,theta0,psi0,ind)
+        ind += 1
+       # for theta in Euler_angle_ranges[1]:
+       #     obj_rotation.axis = 1
+       #     obj = obj_rotation.forward(obj, theta - theta0 )
+       #     theta0 = theta
+       #     for psi in Euler_angle_ranges[2]:
+       #         obj_rotation.axis = 0
+       #         obj = obj_rotation.forward(obj, psi - psi0 )
+       #         psi0 = psi
+       #         #show_obj(obj[:,:,:,0])
+       #         #out = obj[:,:,:,0]**2 + obj[:,:,:,1]**2
+       #         out = op.abs(obj)
+       #         save(out,phi,theta,psi,ind)
+       #         ind +=1
 
                # error(obj,projection,slice_errors,middle,phi,theta,psi)
 
@@ -74,6 +77,7 @@ def show_obj(obj):
 def save(obj,phi,theta,psi,ind):
     sep = '_'
     fname = sep.join([str(ind),str(phi),str(theta),str(psi)])
+
     objj = obj.cpu()
     objj = objj.numpy()
     np.save(fname, objj)
