@@ -50,16 +50,17 @@ if __name__ != "__main__":
         t0 = time.time()
         if verbose:
             print("Reconstruction started")
-        bestErr = 1e30 #initialize error
+        # Initialize error
+        bestErr = 1e30 
 
-        #initialize arrays for error metrics
-        Rfree_complex = np.ones(numIterations)*-1 #
+        # Initialize arrays for error metrics
+        Rfree_complex = np.ones(numIterations)*-1
         errK = np.zeros(numIterations)
 
-        #prefetch indices for monitoring error
+        # Prefetch indices for monitoring error
         errInd = measuredK != 0
 
-        #get dimensions of object
+        # Get dimensions of object
         dims = np.shape(support)
         if R_freeInd_complex:
             Rfree_complex_bybin = np.zeros((np.shape(R_freeInd_complex)[2], numIterations),dtype=float)
@@ -74,47 +75,49 @@ if __name__ != "__main__":
             half_window_y = displayFigure.reconstructionDisplayWindowSize[1]//2
             half_window_z = displayFigure.reconstructionDisplayWindowSize[2]//2
 
-        #setup output dict
+        # Setup output dict
         if R_freeInd_complex:
             outputs = {'reconstruction':initialObject,'errK':errK,'R_free_bybin':Rfree_complex_bybin, "R_free_total":Rfree_complex_total}
         else:
             outputs = {'reconstruction':initialObject,'errK':errK}
 
-        #determine how to divide up the constraint enforcement cutoffs among the iterations by determining
-        #which iterations will require a recalculation of the indices to enforce
+        ## Determine how to divide up the constraint enforcement cutoffs among the iterations by determining
+        #  which iterations will require a recalculation of the indices to enforce
         iterationNumsToChangeCutoff = np.round(np.linspace(1, numIterations, num=np.size(constraintEnforcementDelayIndicators)))
         iterationNumsToChangeCutoff, uniqueIndices = np.unique(iterationNumsToChangeCutoff, return_index=True)
         iterationNumsToChangeCutoff = np.append(iterationNumsToChangeCutoff,1e30) #add an arbitrarily high number to the end that is an iteration number that won't be reached
         constraintEnforcementDelayIndicators = constraintEnforcementDelayIndicators[uniqueIndices]
         currentCutoffNum = 0
-        for iterationNum in range(1, numIterations+1): #iterations are counted started from 1
+        
+        ## Main Reconstruction Loop ##
+        for iterationNum in range(1, numIterations+1): # Iterations are counted started from 1
 
-            if iterationNum == iterationNumsToChangeCutoff[currentCutoffNum]: #update current Fourier constraint if appropriate
+            if iterationNum == iterationNumsToChangeCutoff[currentCutoffNum]: # Update current Fourier constraint if appropriate
                 relevantCutoff = constraintEnforcementDelayIndicators[currentCutoffNum]
                 constraintInd_complex = (constraintIndicators > relevantCutoff) * measuredK != 0
 
-                bestErr = 1e30 #reset error
-                currentCutoffNum+=1#update constraint set number
+                bestErr = 1e30         # Reset error
+                currentCutoffNum += 1  # Update constraint set number
 
             if use_positivity:
-                initialObject[initialObject<0] = 0 #enforce positivity
+                initialObject[initialObject<0] = 0      # Enforce positivity
             if use_support:
-                initialObject = initialObject * support #enforce support
+                initialObject = initialObject * support # Enforce support
 
-            #take FFT of current reconstruction
+            # Take FFT of current reconstruction
             k = rfftn(initialObject)
 
-            #compute error
+            # Compute error
             errK[iterationNum-1] = np.sum(abs(np.abs(k[errInd])-np.abs(measuredK[errInd])))/np.sum(abs(measuredK[errInd]))#monitor error
             if verbose:
                 print("Iteration number: {0}/{1}           error = {2:0.5f}".format(iterationNum, numIterations, errK[iterationNum-1]))
 
-            #update best object if a better one has been found
+            # Update best object if a better one has been found
             if errK[iterationNum-1] < bestErr:
                 bestErr = errK[iterationNum-1]
                 outputs['reconstruction'] = initialObject
 
-            #calculate Rfree for each spatial frequency shell if necessary
+            # Calculate Rfree for each spatial frequency shell if necessary
             if R_freeInd_complex:
                 total_Rfree_error      = 0
                 total_Rfree_error_norm = 0
@@ -132,11 +135,12 @@ if __name__ != "__main__":
                     total_Rfree_error_norm                 += Rfree_denominator
                     Rfree_complex_bybin[shellNum, iterationNum-1] = Rfree_numerator / Rfree_denominator
                 Rfree_complex_total[iterationNum-1] = total_Rfree_error / total_Rfree_error_norm
-            #replace Fourier components with ones from measured data from the current set of constraints
+                
+            # Replace Fourier components with ones from measured data from the current set of constraints
             k[constraintInd_complex] = measuredK[constraintInd_complex]
             initialObject = irfftn(k)
 
-            #update display
+            # Update display
             if displayFigure.DisplayFigureON:
                 if iterationNum % displayFigure.displayFrequency == 0:
                     if verbose:
@@ -201,6 +205,7 @@ if __name__ != "__main__":
                     plt.pause(1e-30) #forces display to update
 
         outputs['errK'] = errK
+        
         if R_freeInd_complex:
             outputs['R_free_bybin'] = Rfree_complex_bybin
             outputs['R_free_total'] = Rfree_complex_total
@@ -332,7 +337,7 @@ if __name__ != "__main__":
         vals_real = np.bincount(masterInd, weights=(masterDistances * np.real(masterVals)))
         vals_cx = np.bincount(masterInd, weights=(masterDistances * np.imag(masterVals)))
         vals = vals_real + 1j * vals_cx
-        sum_weights = np.bincount(masterInd, weights=(masterDistances))
+        sum_weights = np.bincount(masterInd, weights=masterDistances)
         vals[sum_weights != 0] = vals[sum_weights != 0] / sum_weights[sum_weights != 0]
         measuredK[np.arange(np.size(vals))] = vals
         measuredK = np.reshape(measuredK,[dim1,dim1,dim1],order='F')

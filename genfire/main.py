@@ -26,16 +26,16 @@ def main_InteractivelySetParameters():
     # GENFIRE's reconstruction parameters can be edited here by the user and run interactively, any inputs provided
     # by either the command line or the GUI will override these momentarily
 
-    filename_projections = '../data/projections.mat'  #filename of projections, which should be size NxNxN_projections where N_projections is the number of projections
-    filename_angles = '../data/angles.mat'  #angles can be either a 1xN_projections array containing a single tilt series, or 3xN_projections array containing 3 Euler angles for each projections in the form [phi;theta;psi]
-    filename_support = '../data/support60.mat'  #NxNxN binary array specifying a region of 1's in which the reconstruction can exist
-    filename_initialObject = None  #initial object to use in reconstruction; set to None to provide no initial guess
-    filename_results = 'GENFIRE_rec.mrc'  #filename to save results
-    resolutionExtensionSuppressionState = 2 # 1) Turn on resolution extension/suppression, 2) No resolution extension/suppression, 3) Just resolution extension
+    filename_projections = '../data/projections.mat'    # Filename of projections, which should be size NxNxN_projections where N_projections is the number of projections
+    filename_angles = '../data/angles.mat'              # Angles can be either a 1xN_projections array containing a single tilt series, or 3xN_projections array containing 3 Euler angles for each projections in the form [phi;theta;psi]
+    filename_support = '../data/support60.mat'          # NxNxN binary array specifying a region of 1's in which the reconstruction can exist
+    filename_initialObject = None                       # Initial object to use in reconstruction; set to None to provide no initial guess
+    filename_results = 'GENFIRE_rec.mrc'                # Filename to save results
+    resolutionExtensionSuppressionState = 2             # 1) Turn on resolution extension/suppression, 2) No resolution extension/suppression, 3) Just resolution extension
 
-    numIterations = 100  #number of iterations to run in iterative reconstruction
-    oversamplingRatio = 3  #input projections will be padded internally to match this oversampling ratio. If you prepad your projections, set this to 1
-    interpolationCutoffDistance = 0.7  #radius of spherical interpolation kernel (in pixels) within which to include measured datapoints
+    numIterations = 100                     # Number of iterations to run in iterative reconstruction
+    oversamplingRatio = 3                   # Input projections will be padded internally to match this oversampling ratio. If you prepad your projections, set this to 1
+    interpolationCutoffDistance = 0.7       # Radius of spherical interpolation kernel (in pixels) within which to include measured datapoints
     doYouWantToDisplayFigure = True
     displayFigure = genfire.reconstruct.DisplayFigure()
     displayFigure.DisplayFigureON = doYouWantToDisplayFigure
@@ -86,15 +86,15 @@ def main(reconstruction_parameters):
     else:
         filename_initialObject               = None
 
-    ### begin reconstruction ###
+    ### Begin Reconstruction ###
     projections = genfire.fileio.loadProjections(filename_projections) # load projections into a 3D numpy array
 
-    # get dimensions of array and determine the array size after padding
+    ## Get dimensions of array and determine the array size after padding
     dims = np.shape(projections)
     paddedDim = dims[0] * oversamplingRatio
     padding = int((paddedDim-dims[0])/2)
 
-    # load the support, or generate one if none was provided
+    ## Load the support, or generate one if none was provided
     if useDefaultSupport or filename_support == "":
         support = np.ones((dims[0],dims[0],dims[0]),dtype=float)
     else:
@@ -102,19 +102,19 @@ def main(reconstruction_parameters):
 
     displayFigure.reconstructionDisplayWindowSize = np.shape(support) # this is used to show the central region of reconstruction
 
-    # now zero-pad to match the oversampling ratio
+    ## Now zero-pad to match the oversampling ratio
     support = np.pad(support,((padding,padding),(padding,padding),(padding,padding)),'constant')
     projections = np.pad(projections,((padding,padding),(padding,padding),(0,0)),'constant')
 
-    #load initial object, or initialize it to zeros if none was given
+    ## Load initial object, or initialize it to zeros if none was given
     if filename_initialObject is not None and os.path.isfile(filename_initialObject):
         initialObject = genfire.fileio.readVolume(filename_initialObject)
         initialObject = np.pad(initialObject,((padding,padding),(padding,padding),(padding,padding)),'constant')
     else:
         initialObject = np.zeros_like(support)
 
-    # load angles and check that the dimensions match the number of provided projections and that they
-    # are either 1 x num_projections or 3 x num_projections
+    ## Load angles and check that the dimensions match the number of provided projections and that they
+    #  are either 1 x num_projections or 3 x num_projections
     angles = genfire.fileio.loadAngles(filename_angles)
     if np.shape(angles)[1] > 3:
         raise ValueError("Error! Dimension of angles incorrect.")
@@ -124,23 +124,23 @@ def main(reconstruction_parameters):
         angles = tmp
         del tmp
 
-    # grid the projections
+    ## Grid the projections
     if gridding_method == "DFT":
         measuredK = genfire.reconstruct.fillInFourierGrid_DFT(projections, angles, interpolationCutoffDistance, enforceResolutionCircle)
     else:
         measuredK = genfire.reconstruct.fillInFourierGrid(projections, angles, interpolationCutoffDistance, enforceResolutionCircle, permitMultipleGridding)
 
-    # the grid is assembled with the origin at the geometric center of the array, but for efficiency in the
-    # iterative algorithm the origin is shifted to array position [0,0,0] to avoid unnecessary fftshift calls
+    ## The grid is assembled with the origin at the geometric center of the array, but for efficiency in the
+    #  iterative algorithm the origin is shifted to array position [0,0,0] to avoid unnecessary fftshift calls
     measuredK = np.fft.ifftshift(measuredK)
 
-    # create a map of the spatial frequency to be used to control resolution extension/suppression behavior
+    ## Create a map of the spatial frequency to be used to control resolution extension/suppression behavior
     K_indices = genfire.utility.generateKspaceIndices(support)
     K_indices = np.fft.fftshift(K_indices)
     resolutionIndicators = np.zeros_like(K_indices)
     resolutionIndicators[measuredK != 0] = 1-K_indices[measuredK != 0]
 
-    # if calculating Rfree, setup some infrastructure
+    ## If calculating Rfree, setup some infrastructure
     if calculateRFree:
         R_freeInd_complexX = []
         R_freeInd_complexY = []
@@ -181,6 +181,7 @@ def main(reconstruction_parameters):
         R_freeInd_complex = []
         R_freeVals_complex = []
 
+    ## Resolution Extension/Suppression
     if resolutionExtensionSuppressionState==1: # resolution extension/suppression
         constraintEnforcementDelayIndicators = np.array(np.concatenate((np.arange(0.95, -.25, -0.15), np.arange(-0.15, .95, .1)), axis=0))
     elif resolutionExtensionSuppressionState==2:# no resolution extension or suppression
@@ -191,9 +192,10 @@ def main(reconstruction_parameters):
         print("Warning! Input resolutionExtensionSuppressionState does not match an available option. Deactivating dynamic constraint enforcement and continuing.\n")
         constraintEnforcementDelayIndicators = np.array([-999, -999, -999, -999])
 
+    ## Reconstruct ##
     reconstructionOutputs = genfire.reconstruct.reconstruct(numIterations, np.fft.fftshift(initialObject), np.fft.fftshift(support), (measuredK)[:, :, 0:(np.shape(measuredK)[-1] // 2 + 1)], (resolutionIndicators)[:, :, 0:(np.shape(measuredK)[-1] // 2 + 1)], constraintEnforcementDelayIndicators, R_freeInd_complex, R_freeVals_complex, displayFigure, use_positivity, use_support)
 
-    # reclaim original array size. ncBig is center of oversampled array, and n2 is the half-width of original array
+    ## Reclaim original array size. ncBig is center of oversampled array, and n2 is the half-width of original array
     ncBig = paddedDim//2
     n2 = dims[0]//2
     reconstructionOutputs['reconstruction'] = reconstructionOutputs['reconstruction'][ncBig-n2:ncBig+n2,ncBig-n2:ncBig+n2,ncBig-n2:ncBig+n2]
