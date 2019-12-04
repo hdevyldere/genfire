@@ -13,6 +13,8 @@ pars = dict(projections   =  path + "y4_short.mat",
 
             numIterations  =  20,
             calculateRfree  =  1,
+
+            initialProjs = [-8 -5 -2 1 4 7]
             )
 
 GF = gf.reconstruct.GenfireReconstructor(**pars)

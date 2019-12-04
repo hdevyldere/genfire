@@ -129,17 +129,28 @@ def main(reconstruction_parameters):
 
     ## Create indicies for which projections are to be used each reconstruction
     active_inds = zeros(np.shape(projections,2))
+    if initialProjs is None:                  # Create a set of starting projection indices based around the zero-degree tiltangle
+        try:
+            index, indy = np.where(angles == 0)
+            adsub, rem = np.divmod(numInitProjs, 2)
+            if index[0]-adsub >= 0:
+                if rem is not None:
+                    index = index[0] + np.arange(-adsub,adsub,numInitProjs)
+                else:
+                    index = index[0] + np.arange(-adsub,adsub+1,numInitProjs)
+            else:
+                index = np.arange(numInitProjs)
+        except:
+            raise Exception("Could not find the 0 degree tilt projection. Please make enter the tilt angles of the initial projections or make sure that a 0 degree projection exists.")
 
-    if initialProjs is None:
-        index, indy = np.where(angles == 0)
-        adsub = np.floor(numInitProjs / 2)
-        if index[0]
-            index = index[0] + linspace(-round(numInitProjs / 2), round(numInitProjs / 2), numInitProjs)
-            indy =
-    else:
-        index = [ind[0] for ind in np.where(i) for i in initialProjs]
-        index = [ind[0] for ind in index]
-
+    else:                                       # Get initial projection indices
+        for iP in initialProjs:
+            nd = np.where(angles[1, :] == iP)
+            if nd.size >0:
+                index.append(nd)
+            else:
+                raise Exception('Starting projection angle %s could not be found in the angles file. Please double check the initialProjs input and the angles file.' % iP)
+    active_inds(index) = True
 
     ## Grid the projections
     if gridding_method == "DFT":
