@@ -213,6 +213,7 @@ if __name__ != "__main__":
             outputs['R_free_bybin'] = Rfree_complex_bybin
             outputs['R_free_total'] = Rfree_complex_total
         outputs['reconstruction'] = np.fft.fftshift(outputs['reconstruction'])
+        outputs['k'] = k
         if verbose:
             print("Reconstruction finished in {0:0.1f} seconds".format(time.time()-t0))
         return outputs
@@ -966,6 +967,10 @@ class GenfireReconstructor():
                         'Starting projection angle %s could not be found in the angles file. Please double check the initialProjs input and the angles file.' % iP)
         activeInds(index) = True
         return activeInds
+    def addProjections(self, projections, results):
+
+    def rotationShears(self):
+
 
     def reconstruct(self):
         if self.params.verbose:
@@ -1021,16 +1026,7 @@ class GenfireReconstructor():
         # New Stuff #
 
 
-        # Get starting projection indices
-        activeInds = self.getActiveInds(projections,eulerAngles)
-
-        # Calculate number of loops necessary to add all projections in
-        numLoops = max( eulerAngles.shape[0] - max(activeInds), min(activeInds) )
-
-        # Loop for adding projections
-        for a0 in numLoops:
-                
-        # grid the projections
+        # grid initial projections
         if self.params.griddingMethod == "DFT":
             measuredK = genfire.reconstruct.fillInFourierGrid_DFT(projections,
                                                                   eulerAngles,
@@ -1053,8 +1049,21 @@ class GenfireReconstructor():
         resolutionIndicators = np.zeros_like(K_indices)
         resolutionIndicators[measuredK != 0] = 1-K_indices[measuredK != 0]
 
-        # if calculating Rfree, setup some infrastructure
-        if self.params.calculateRfree:
+
+        # Get starting projection indices
+        activeInds = self.getActiveInds(projections,eulerAngles)
+
+        # Calculate number of loops necessary to add all projections in
+        numLoops = max( eulerAngles.shape[0] - max(activeInds), min(activeInds) )
+
+        # Loop for adding projections
+        for a0 in np.arange(numLoops):
+            if a0 is not 0:
+                newInds = [max(0,min(activeInds)-1), min(eulerAngles.shape[0], max(activeInds)+1)]
+                self.addProjections( newInds, results )
+
+        # if calculating Rfree and all projections have been added, setup some infrastructure
+        if self.params.calculateRfree && a0 == numLoops:
             R_freeInd_complexX = []
             R_freeInd_complexY = []
             R_freeInd_complexZ = []
@@ -1106,6 +1115,7 @@ class GenfireReconstructor():
                 constraintEnforcementDelayIndicators = np.array([-999, -999, -999, -999])
 
 
+        # Recursive function instead of looping
         results = reconstruct(self.params.numIterations,
                               np.fft.fftshift(initialObject),
                               np.fft.fftshift(support),
@@ -1118,6 +1128,8 @@ class GenfireReconstructor():
                               self.params.constraintPositivity,
                               self.params.constraintSupport,
                               self.params.verbose)
+
+        # Think this needs to move out of the loop
         ncBig = paddedDim//2
         n2 = dims[0]//2
         results['reconstruction'] = results['reconstruction'][ncBig-n2:ncBig+n2,ncBig-n2:ncBig+n2,ncBig-n2:ncBig+n2]
