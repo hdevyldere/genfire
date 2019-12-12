@@ -257,9 +257,9 @@ if __name__ != "__main__":
         for projNum in range(0, numProjections):
 
             # convert angles to radians and construct the rotation matrix
-            phi = angles[projNum, 0] * PI/180
-            theta = angles[projNum, 1] * PI/180
-            psi = angles[projNum, 2] * PI/180
+            phi    = angles[projNum, 0] * PI/180
+            theta  = angles[projNum, 1] * PI/180
+            psi    = angles[projNum, 2] * PI/180
             R = np.array([[np.cos(psi)*np.cos(theta)*np.cos(phi)-np.sin(psi)*np.sin(phi) ,np.cos(psi)*np.cos(theta)*np.sin(phi)+np.sin(psi)*np.cos(phi)   ,    -np.cos(psi)*np.sin(theta)],
             [-np.sin(psi)*np.cos(theta)*np.cos(phi)-np.cos(psi)*np.sin(phi), -np.sin(psi)*np.cos(theta)*np.sin(phi)+np.cos(psi)*np.cos(phi) ,   np.sin(psi)*np.sin(theta) ],
             [np.sin(theta)*np.cos(phi)                               , np.sin(theta)*np.sin(phi)                                ,              np.cos(theta)]])

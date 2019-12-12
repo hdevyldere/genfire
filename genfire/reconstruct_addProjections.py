@@ -25,6 +25,10 @@ import genfire
 from multiprocessing import Pool
 from genfire.utility import *
 
+import sys
+sys.path.append(os.getcwd())
+import utilities as ut
+
 PI = np.pi
 if __name__ != "__main__":
     def reconstruct(numIterations, initialObject, support, measuredK, constraintIndicators, constraintEnforcementDelayIndicators, R_freeInd_complex, R_freeVals_complex, displayFigure, use_positivity=True, use_support=True, verbose=True):
@@ -937,8 +941,8 @@ class GenfireReconstructor():
         print("enforceResolutionCircle = {}".format(self.params.enforceResolutionCircle))
         print("permitMultipleGridding = {}".format(self.params.permitMultipleGridding))
 
-    def getActiveInds(self, projections, eulerAngles):
-        activeInds = zeros(np.shape(projections, 2))
+    def getActiveInds(self, num_projections, eulerAngles):
+        self.activeInds = zeros(num_projections)
         if initialProjs is None:
             # Create a set of starting projection indices based around the zero-degree tiltangle
             try:
@@ -965,12 +969,72 @@ class GenfireReconstructor():
                 else:
                     raise Exception(
                         'Starting projection angle %s could not be found in the angles file. Please double check the initialProjs input and the angles file.' % iP)
-        activeInds(index) = True
-        return activeInds
-    def addProjections(self, projections, results):
+        self.activeInds(index) = 1
 
-    def rotationShears(self):
+    def addProjections(self, projections, eulerAngles):
+        if not self.cx:
+            dims = np.shape(self.results['k'])
+            Xcenter = round(dims[0] // 2)
+            Ycenter = round(dims[1] // 2)
+            Zcenter = round(dims[2] // 2)
+            self.cx = np.arange(0, dims[0]) - Xcenter
+            self.cy = np.arange(0, dims[1]) - Ycenter
+            self.cz = np.arange(0, dims[2]) - Zcenter
+        myInterp = RegularGridInterpolator((self.cx, self.cy, self.cz), self.results['k'], bounds_error=False, fill_value=0)
+        refine_angle(myInterp, projections, eulerAngles)
 
+    def refine_angle(self, myInterp, projections, eulerAngles):
+        dim1 = projections.shape[0]
+        dim2 = projections.shape[1]
+        for newInd in self.newInds:
+            kproj = fftn(projections[:,:,newInd])
+            temp_phi    = self.phiRange + eulerAngles[newInd,0]
+            temp_theta  = self.thetaRange + eulerAngles[newInd, 1]
+            temp_psi    = self.psiRange + eulerAngles[newInd, 2]
+            error = []
+            for phi in temp_phi:
+                for theta in temp_theta:
+                    for psi in temp_psi:
+                        self.rotate_coordinates(dim1,dim2,[phi,theta,psi])
+                        kslice = myInterp(self.rotKCoords[str([phi,theta,psi])].T)
+                        error.append(self.error_function(kproj,kslice))
+
+    def rotate_coordinates(self,dim1,dim2,eulerAngles):
+        ''' angles should be a n x 3 matrix: phi, theta, psi'''
+
+        nc = np.round(dim1 / 2)
+        n2 = nc
+        Kcoordinates = np.zeros([3, dim1 * dim2], dtype=float)
+        self.rotkCoords = {} #np.empty([ dim_a*3, dim1*dim2 ])
+        dim_a = angles.shape[1]
+
+        if not self.ky:
+            ky, kx = np.meshgrid(np.arange(-n2, n2, 1, dtype=float), np.arange(-n2, n2, 1, dtype=float))
+            kx = np.reshape(kx, [1, dim1 * dim2], 'F')
+            ky = np.reshape(ky, [1, dim1 * dim2], 'F')
+            kz = np.zeros([1, dim1 * dim1])
+            self.kx = kx
+            self.ky = ky
+            self.kz = kz
+
+        for angle in [eulerAngles[a0,:] for a0 in range(eulerAngles.shape[0])]:
+            # convert angles to radians and construct the rotation matrix
+            phi    = angle[0] * PI / 180
+            theta  = angle[1] * PI / 180
+            psi    = angle[2] * PI / 180
+            R = np.array([[np.cos(psi) * np.cos(theta) * np.cos(phi) - np.sin(psi) * np.sin(phi),
+                           np.cos(psi) * np.cos(theta) * np.sin(phi) + np.sin(psi) * np.cos(phi),
+                           -np.cos(psi) * np.sin(theta)],
+                          [-np.sin(psi) * np.cos(theta) * np.cos(phi) - np.cos(psi) * np.sin(phi),
+                           -np.sin(psi) * np.cos(theta) * np.sin(phi) + np.cos(psi) * np.cos(phi),
+                           np.sin(psi) * np.sin(theta)],
+                          [np.sin(theta) * np.cos(phi), np.sin(theta) * np.sin(phi), np.cos(theta)]])
+            R = R.T
+
+            Kcoordinates[0, :] = self.kx
+            Kcoordinates[1, :] = self.ky
+            Kcoordinates[2, :] = self.kz
+            self.rotkCoords[str(angle)] = np.dot(R, Kcoordinates)
 
     def reconstruct(self):
         if self.params.verbose:
@@ -996,6 +1060,7 @@ class GenfireReconstructor():
             tmp[1, :] = eulerAngles
             angles = tmp
             del tmp
+
 
         # get dimensions of array and determine the array size after padding
         dims = np.shape(projections)
@@ -1051,7 +1116,7 @@ class GenfireReconstructor():
 
 
         # Get starting projection indices
-        activeInds = self.getActiveInds(projections,eulerAngles)
+        self.getActiveInds(projections,eulerAngles)
 
         # Calculate number of loops necessary to add all projections in
         numLoops = max( eulerAngles.shape[0] - max(activeInds), min(activeInds) )
@@ -1059,8 +1124,8 @@ class GenfireReconstructor():
         # Loop for adding projections
         for a0 in np.arange(numLoops):
             if a0 is not 0:
-                newInds = [max(0,min(activeInds)-1), min(eulerAngles.shape[0], max(activeInds)+1)]
-                self.addProjections( newInds, results )
+                self.newInds = [max(0,min(activeInds)-1), min(eulerAngles.shape[0], max(activeInds)+1)]
+                self.add_projections()
 
         # if calculating Rfree and all projections have been added, setup some infrastructure
         if self.params.calculateRfree && a0 == numLoops:
