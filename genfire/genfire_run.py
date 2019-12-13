@@ -18,6 +18,7 @@ pars = dict(projections   =  path + "y4_short.mat",
             phiRange = [],
             thetaRange = [],
             psiRange = [],
+            errorFunction = ,
             )
 
 GF = gf.reconstruct.GenfireReconstructor(**pars)

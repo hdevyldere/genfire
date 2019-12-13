@@ -742,6 +742,11 @@ class ReconstructionParameters():
         self.permitMultipleGridding              = True
         self.verbose                             = True
 
+        self.errorFunction                       = xCorr  # Function imported from utility.py
+        self.phiRange                            = []
+        self.thetaRange                          = []
+        self.psiRange                            = []
+
     def checkParameters(self): #verify file extensions are supported
         import os
         parametersAreGood = 1
@@ -910,6 +915,10 @@ class GenfireReconstructor():
         ##
         self.params.numInitProjs = numInitProjs
         self.params.initialProjs = initialProjs
+        self.params.phiRange     = phiRange
+        self.params.thetaRange   = thetaRange
+        self.params.psiRange     = psiRange
+        self.params.errorFunction = errorFunction
 
     def printGenfire(self):
         print("""
@@ -971,7 +980,7 @@ class GenfireReconstructor():
                         'Starting projection angle %s could not be found in the angles file. Please double check the initialProjs input and the angles file.' % iP)
         self.activeInds(index) = 1
 
-    def addProjections(self, projections, eulerAngles):
+    def get_interpolator(self):
         if not self.cx:
             dims = np.shape(self.results['k'])
             Xcenter = round(dims[0] // 2)
@@ -980,24 +989,27 @@ class GenfireReconstructor():
             self.cx = np.arange(0, dims[0]) - Xcenter
             self.cy = np.arange(0, dims[1]) - Ycenter
             self.cz = np.arange(0, dims[2]) - Zcenter
-        myInterp = RegularGridInterpolator((self.cx, self.cy, self.cz), self.results['k'], bounds_error=False, fill_value=0)
-        refine_angle(myInterp, projections, eulerAngles)
+        return RegularGridInterpolator((self.cx, self.cy, self.cz), self.results['k'], bounds_error=False, fill_value=0)
 
     def refine_angle(self, myInterp, projections, eulerAngles):
         dim1 = projections.shape[0]
         dim2 = projections.shape[1]
         for newInd in self.newInds:
             kproj = fftn(projections[:,:,newInd])
-            temp_phi    = self.phiRange + eulerAngles[newInd,0]
-            temp_theta  = self.thetaRange + eulerAngles[newInd, 1]
-            temp_psi    = self.psiRange + eulerAngles[newInd, 2]
-            error = []
+            temp_phi    = self.params.phiRange + eulerAngles[newInd,0]
+            temp_theta  = self.params.thetaRange + eulerAngles[newInd, 1]
+            temp_psi    = self.params.psiRange + eulerAngles[newInd, 2]
+            bestCorr = 0
             for phi in temp_phi:
                 for theta in temp_theta:
                     for psi in temp_psi:
                         self.rotate_coordinates(dim1,dim2,[phi,theta,psi])
                         kslice = myInterp(self.rotKCoords[str([phi,theta,psi])].T)
-                        error.append(self.error_function(kproj,kslice))
+                        corr, xyshifts = self.error_function(kslice,kproj)
+                        if corr > bestCorr:
+                            self.bestCorr[newInd] = corr
+                            self.xyshifts[newInd] = xyshifts
+                            self.phithetapsi[newInd] = [phi, theta, psi]
 
     def rotate_coordinates(self,dim1,dim2,eulerAngles):
         ''' angles should be a n x 3 matrix: phi, theta, psi'''
@@ -1006,7 +1018,7 @@ class GenfireReconstructor():
         n2 = nc
         Kcoordinates = np.zeros([3, dim1 * dim2], dtype=float)
         self.rotkCoords = {} #np.empty([ dim_a*3, dim1*dim2 ])
-        dim_a = angles.shape[1]
+        dim_a = eulerAngles.shape[1]
 
         if not self.ky:
             ky, kx = np.meshgrid(np.arange(-n2, n2, 1, dtype=float), np.arange(-n2, n2, 1, dtype=float))
@@ -1079,18 +1091,6 @@ class GenfireReconstructor():
         support = np.pad(support,((padding,padding),(padding,padding),(padding,padding)),'constant')
         projections = np.pad(projections,((padding,padding),(padding,padding),(0,0)),'constant')
 
-        #load initial object, or initialize it to zeros if none was given
-        if isinstance(self.params.initialObject, np.ndarray):
-            initialObject = self.params.initialObject
-        else:
-            if self.params.initialObject is not None and os.path.isfile(self.params.initialObject):
-                initialObject = genfire.fileio.readVolume(self.params.initialObject)
-                initialObject = np.pad(initialObject,((padding,padding),(padding,padding),(padding,padding)),'constant')
-            else:
-                initialObject = np.zeros_like(support)
-        # New Stuff #
-
-
         # grid initial projections
         if self.params.griddingMethod == "DFT":
             measuredK = genfire.reconstruct.fillInFourierGrid_DFT(projections,
@@ -1115,84 +1115,97 @@ class GenfireReconstructor():
         resolutionIndicators[measuredK != 0] = 1-K_indices[measuredK != 0]
 
 
-        # Get starting projection indices
-        self.getActiveInds(projections,eulerAngles)
-
-        # Calculate number of loops necessary to add all projections in
-        numLoops = max( eulerAngles.shape[0] - max(activeInds), min(activeInds) )
+        self.getActiveInds(projections,eulerAngles)                               # Get starting active indicies
+        numLoops = max( eulerAngles.shape[0] - max(activeInds), min(activeInds) ) # Calculate number of loops necessary to add all projections in
+        self.bestCorr     = np.empty(dims[2])
+        self.xyshifts     = np.empty(dims[2])
+        self.phithetapsi  = np.empty(dims[2])
 
         # Loop for adding projections
         for a0 in np.arange(numLoops):
             if a0 is not 0:
                 self.newInds = [max(0,min(activeInds)-1), min(eulerAngles.shape[0], max(activeInds)+1)]
-                self.add_projections()
+                myInterp = self.get_interpolator()
+                refine_angle(myInterp, projections, eulerAngles)
+                self.params.initialObject = self.results['reconstruction']
 
-        # if calculating Rfree and all projections have been added, setup some infrastructure
-        if self.params.calculateRfree && a0 == numLoops:
-            R_freeInd_complexX = []
-            R_freeInd_complexY = []
-            R_freeInd_complexZ = []
-            R_freeVals_complex = []
-            shell_thickness_pixels = 1 # pixel thickness of an individual shell of Rfree points
-            numberOfBins = int(round(dims[0]/2/shell_thickness_pixels)) # number of frequency bins. Rfree will be tracked within each shell separately
-            percentValuesForRfree = 0.05 # percentage of measured points to withhold
-            spatialFrequencyForRfree = np.linspace(0,1,numberOfBins+1)
-            K_indicesSmall =(K_indices)[:, :, 0:(np.shape(measuredK)[-1]//2+1)]
+            # load initial object, or initialize it to zeros if none was given
+            if isinstance(self.params.initialObject, np.ndarray):
+                initialObject = self.params.initialObject
+            else:
+                if self.params.initialObject is not None and os.path.isfile(self.params.initialObject):
+                    initialObject = genfire.fileio.readVolume(self.params.initialObject)
+                    initialObject = np.pad(initialObject, ((padding, padding), (padding, padding), (padding, padding)),
+                                           'constant')
+                else:
+                    initialObject = np.zeros_like(support)
 
-            for shellNum in range(0,numberOfBins):
-                # collect relevant points
-                measuredPointInd_complex = np.where((measuredK[:, :, 0:(np.shape(measuredK)[-1]//2+1)] != 0) & (K_indicesSmall>=(spatialFrequencyForRfree[shellNum])) & (K_indicesSmall<=(spatialFrequencyForRfree[shellNum+1])))
+            # if calculating Rfree and all projections have been added, setup some infrastructure
+            if self.params.calculateRfree && a0 == numLoops:
+                R_freeInd_complexX = []
+                R_freeInd_complexY = []
+                R_freeInd_complexZ = []
+                R_freeVals_complex = []
+                shell_thickness_pixels = 1 # pixel thickness of an individual shell of Rfree points
+                numberOfBins = int(round(dims[0]/2/shell_thickness_pixels)) # number of frequency bins. Rfree will be tracked within each shell separately
+                percentValuesForRfree = 0.05 # percentage of measured points to withhold
+                spatialFrequencyForRfree = np.linspace(0,1,numberOfBins+1)
+                K_indicesSmall =(K_indices)[:, :, 0:(np.shape(measuredK)[-1]//2+1)]
 
-                # randomly shuffle
-                shuffledPoints = np.random.permutation(np.shape(measuredPointInd_complex)[1])
-                measuredPointInd_complex = (measuredPointInd_complex[0][shuffledPoints], measuredPointInd_complex[1][shuffledPoints], measuredPointInd_complex[2][shuffledPoints])
+                for shellNum in range(0,numberOfBins):
+                    # collect relevant points
+                    measuredPointInd_complex = np.where((measuredK[:, :, 0:(np.shape(measuredK)[-1]//2+1)] != 0) & (K_indicesSmall>=(spatialFrequencyForRfree[shellNum])) & (K_indicesSmall<=(spatialFrequencyForRfree[shellNum+1])))
 
-                # determine how many values to take
-                cutoffInd_complex = np.floor(np.shape(measuredPointInd_complex)[1] * percentValuesForRfree).astype(int)
+                    # randomly shuffle
+                    shuffledPoints = np.random.permutation(np.shape(measuredPointInd_complex)[1])
+                    measuredPointInd_complex = (measuredPointInd_complex[0][shuffledPoints], measuredPointInd_complex[1][shuffledPoints], measuredPointInd_complex[2][shuffledPoints])
 
-                # collect the Rfree values and coordinates
-                R_freeInd_complexX.append(measuredPointInd_complex[0][:cutoffInd_complex])
-                R_freeInd_complexY.append(measuredPointInd_complex[1][:cutoffInd_complex])
-                R_freeInd_complexZ.append(measuredPointInd_complex[2][:cutoffInd_complex])
-                R_freeVals_complex.append(measuredK[R_freeInd_complexX[shellNum], R_freeInd_complexY[shellNum], R_freeInd_complexZ[shellNum] ])
+                    # determine how many values to take
+                    cutoffInd_complex = np.floor(np.shape(measuredPointInd_complex)[1] * percentValuesForRfree).astype(int)
 
-                # delete the points from the measured data
-                measuredK[R_freeInd_complexX[shellNum], R_freeInd_complexY[shellNum], R_freeInd_complexZ[shellNum]] = 0
+                    # collect the Rfree values and coordinates
+                    R_freeInd_complexX.append(measuredPointInd_complex[0][:cutoffInd_complex])
+                    R_freeInd_complexY.append(measuredPointInd_complex[1][:cutoffInd_complex])
+                    R_freeInd_complexZ.append(measuredPointInd_complex[2][:cutoffInd_complex])
+                    R_freeVals_complex.append(measuredK[R_freeInd_complexX[shellNum], R_freeInd_complexY[shellNum], R_freeInd_complexZ[shellNum] ])
 
-            # create tuple of coordinates
-            R_freeInd_complex = [[R_freeInd_complexX], [R_freeInd_complexY], [R_freeInd_complexZ]]
-            del R_freeInd_complexX
-            del R_freeInd_complexY
-            del R_freeInd_complexZ
-        else:
-            R_freeInd_complex = []
-            R_freeVals_complex = []
+                    # delete the points from the measured data
+                    measuredK[R_freeInd_complexX[shellNum], R_freeInd_complexY[shellNum], R_freeInd_complexZ[shellNum]] = 0
 
-        if self.params.resolutionExtensionSuppressionState==1: # resolution extension/suppression
-            constraintEnforcementDelayIndicators = np.array(np.concatenate((np.arange(0.95, -.25, -0.15), np.arange(-0.15, .95, .1)), axis=0))
-        elif self.params.resolutionExtensionSuppressionState==2:# no resolution extension or suppression
-            constraintEnforcementDelayIndicators = np.array([-999, -999, -999, -999])
-        elif self.params.resolutionExtensionSuppressionState==3:# resolution extension only
-            constraintEnforcementDelayIndicators = np.concatenate((np.arange(0.95, -.15, -0.15),[-0.15, -0.15, -0.15]))
-        else:
-            if self.params.verbose:
-                print("Warning! Input resolutionExtensionSuppressionState does not match an available option. Deactivating dynamic constraint enforcement and continuing.\n")
+                # create tuple of coordinates
+                R_freeInd_complex = [[R_freeInd_complexX], [R_freeInd_complexY], [R_freeInd_complexZ]]
+                del R_freeInd_complexX
+                del R_freeInd_complexY
+                del R_freeInd_complexZ
+            else:
+                R_freeInd_complex = []
+                R_freeVals_complex = []
+
+            if self.params.resolutionExtensionSuppressionState==1: # resolution extension/suppression
+                constraintEnforcementDelayIndicators = np.array(np.concatenate((np.arange(0.95, -.25, -0.15), np.arange(-0.15, .95, .1)), axis=0))
+            elif self.params.resolutionExtensionSuppressionState==2:# no resolution extension or suppression
                 constraintEnforcementDelayIndicators = np.array([-999, -999, -999, -999])
+            elif self.params.resolutionExtensionSuppressionState==3:# resolution extension only
+                constraintEnforcementDelayIndicators = np.concatenate((np.arange(0.95, -.15, -0.15),[-0.15, -0.15, -0.15]))
+            else:
+                if self.params.verbose:
+                    print("Warning! Input resolutionExtensionSuppressionState does not match an available option. Deactivating dynamic constraint enforcement and continuing.\n")
+                    constraintEnforcementDelayIndicators = np.array([-999, -999, -999, -999])
 
 
-        # Recursive function instead of looping
-        results = reconstruct(self.params.numIterations,
-                              np.fft.fftshift(initialObject),
-                              np.fft.fftshift(support),
-                              (measuredK)[:, :, 0:(np.shape(measuredK)[-1] // 2 + 1)],
-                              (resolutionIndicators)[:, :, 0:(np.shape(measuredK)[-1] // 2 + 1)],
-                              constraintEnforcementDelayIndicators,
-                              R_freeInd_complex,
-                              R_freeVals_complex,
-                              self.params.displayFigure,
-                              self.params.constraintPositivity,
-                              self.params.constraintSupport,
-                              self.params.verbose)
+            # Recursive function instead of looping
+            results = reconstruct(self.params.numIterations,
+                                  np.fft.fftshift(initialObject),
+                                  np.fft.fftshift(support),
+                                  (measuredK)[:, :, 0:(np.shape(measuredK)[-1] // 2 + 1)],
+                                  (resolutionIndicators)[:, :, 0:(np.shape(measuredK)[-1] // 2 + 1)],
+                                  constraintEnforcementDelayIndicators,
+                                  R_freeInd_complex,
+                                  R_freeVals_complex,
+                                  self.params.displayFigure,
+                                  self.params.constraintPositivity,
+                                  self.params.constraintSupport,
+                                  self.params.verbose)
 
         # Think this needs to move out of the loop
         ncBig = paddedDim//2
