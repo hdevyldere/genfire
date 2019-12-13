@@ -534,3 +534,11 @@ def printStringOrNumpyArray(value, name):
         print("{} = {} NumPy array of type {}".format(name, value.shape, value.dtype))
     else:
         print("{} = {}".format(name, value))
+
+def xCorr(kslice,kproj):
+    ps = rfftn(kslice) * np.conj(rfftn(kproj))
+    corr = max(irfftn(ps[:]))
+    corrX, corrY = np.where( ps == corr)
+    return corr, [corrX[0],corrY[0]]
+
+
